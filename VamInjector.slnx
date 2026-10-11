@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VamInjector/VamInjector.csproj" />
+  </Folder>
+  <Folder Name="/verify/">
+    <Project Path="verify/VamInjector.Verify.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,45 @@
+# VAM asset files (the tool's input/output — never part of the source tree)
+*.var
+
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+build/
+bld/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.sln.docstates
+*.swp
+*.[Dd]esktop.ini
+*.[Dd]esktop.ini.metadata
+$RECYCLE.BIN/
+
+# Misc
+*.log
+*.tmp
+*.bak
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# OS
+.DS_Store

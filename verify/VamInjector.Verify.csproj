@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>VamInjector.Verify</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+
+  <!-- Link the pure (non-WPF) source files from the WPF project so
+       we're verifying the EXACT same code the UI uses, not a copy.
+       RelayCommand.cs is intentionally NOT linked: it depends on
+       System.Windows.Input.CommandManager and only the WPF UI uses it. -->
+  <ItemGroup>
+    <Compile Include="..\src\VamInjector\Services\VajInjectionService.cs" Link="Linked\VajInjectionService.cs" />
+    <Compile Include="..\src\VamInjector\Services\VarPackageService.cs" Link="Linked\VarPackageService.cs" />
+    <Compile Include="..\src\VamInjector\Models\ObservableObject.cs" Link="Linked\ObservableObject.cs" />
+  </ItemGroup>
+
+</Project>
