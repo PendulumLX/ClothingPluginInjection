@@ -11,19 +11,33 @@ namespace VamInjector.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
-    private string? _currentArchivePath;
-    public string? CurrentArchivePath
+    /// <summary>All archives currently loaded (each drop replaces this list).</summary>
+    public ObservableCollection<ArchiveViewModel> Archives { get; } = new();
+
+    private ArchiveViewModel? _selectedArchive;
+    public ArchiveViewModel? SelectedArchive
     {
-        get => _currentArchivePath;
-        private set { if (SetField(ref _currentArchivePath, value)) OnPropertyChanged(nameof(ArchiveDisplayName)); }
+        get => _selectedArchive;
+        set
+        {
+            if (SetField(ref _selectedArchive, value))
+            {
+                OnPropertyChanged(nameof(HasSelection));
+                OnPropertyChanged(nameof(SelectedVajEntries));
+            }
+        }
     }
 
-    public string ArchiveDisplayName =>
-        _currentArchivePath is null ? "(no .var loaded)" : Path.GetFileName(_currentArchivePath);
+    public bool HasSelection => _selectedArchive is not null;
 
-    public ObservableCollection<VajEntryInfo> VajEntries { get; } = new();
+    /// <summary>
+    /// Bound by the right ListBox. Returns the selected archive's entries,
+    /// or an empty list when nothing is selected so the binding never nulls.
+    /// </summary>
+    public IReadOnlyList<VajEntryInfo> SelectedVajEntries =>
+        _selectedArchive?.VajEntries ?? Array.Empty<VajEntryInfo>();
 
-    private string _statusMessage = "Drop a .var file onto this window to begin.";
+    private string _statusMessage = "Drop one or more .var files onto this window to begin.";
     public string StatusMessage
     {
         get => _statusMessage;
@@ -59,77 +73,114 @@ public sealed class MainViewModel : ObservableObject
     public MainViewModel()
     {
         InjectCommand = new RelayCommand(
-            execute: _ => _ = InjectAsync(),
-            canExecute: _ => !IsBusy && _currentArchivePath is not null && VajEntries.Count > 0);
+            execute: _ => _ = InjectAllAsync(),
+            canExecute: _ => !IsBusy && Archives.Count > 0);
     }
 
-    public void OpenArchive(string archivePath)
+    /// <summary>
+    /// Loads the given paths. Replaces any previously loaded archives.
+    /// Each path is opened independently — failures are collected into
+    /// LastError and the survivors still load.
+    /// </summary>
+    public void OpenArchives(IEnumerable<string> paths)
     {
         LastError = null;
-        try
-        {
-            var result = VarPackageService.Open(archivePath);
+        Archives.Clear();
+        SelectedArchive = null;
 
-            CurrentArchivePath = result.ArchivePath;
-            VajEntries.Clear();
-            foreach (var entry in result.VajEntries)
-                VajEntries.Add(entry);
+        var loadedNames = new List<string>();
+        var failures = new List<string>();
 
-            StatusMessage = result.VajEntries.Count == 0
-                ? $"Loaded {Path.GetFileName(archivePath)} — no .vaj files found."
-                : $"Loaded {Path.GetFileName(archivePath)} — {result.VajEntries.Count} .vaj file(s). Click Inject to apply plugin blocks.";
+        foreach (var path in paths)
+        {
+            if (!path.EndsWith(".var", StringComparison.OrdinalIgnoreCase))
+            {
+                failures.Add($"{Path.GetFileName(path)} (not a .var file)");
+                continue;
+            }
+            if (!File.Exists(path))
+            {
+                failures.Add($"{Path.GetFileName(path)} (not found)");
+                continue;
+            }
 
-            InjectCommand.RaiseCanExecuteChanged();
+            try
+            {
+                var result = VarPackageService.Open(path);
+                Archives.Add(new ArchiveViewModel(path, result.VajEntries));
+                loadedNames.Add(Path.GetFileName(path));
+            }
+            catch (InvalidDataException)
+            {
+                failures.Add($"{Path.GetFileName(path)} (not a valid zip)");
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{Path.GetFileName(path)} ({ex.GetType().Name}: {ex.Message})");
+            }
         }
-        catch (InvalidDataException)
-        {
-            LastError = $"Not a valid .var (zip) file: {Path.GetFileName(archivePath)}";
-            ResetArchive("Invalid .var file.");
-        }
-        catch (Exception ex)
-        {
-            LastError = $"Failed to open {Path.GetFileName(archivePath)}: {ex.Message}";
-            ResetArchive("Open failed.");
-        }
+
+        // Auto-select the first archive so the .vaj preview is populated
+        // immediately on a fresh drop.
+        if (Archives.Count > 0)
+            SelectedArchive = Archives[0];
+
+        StatusMessage = BuildOpenStatusMessage(loadedNames.Count, failures);
+        if (failures.Count > 0)
+            LastError = "Some files were skipped:\n  • " + string.Join("\n  • ", failures);
+
+        InjectCommand.RaiseCanExecuteChanged();
     }
 
-    private async Task InjectAsync()
+    private string BuildOpenStatusMessage(int loadedCount, IReadOnlyList<string> failures)
     {
-        if (_currentArchivePath is null) return;
+        if (loadedCount == 0)
+            return "No archives loaded.";
+
+        var totalVaj = 0;
+        foreach (var a in Archives) totalVaj += a.VajEntries.Count;
+
+        var msg = $"Loaded {loadedCount} archive(s) — {totalVaj} .vaj file(s) total.";
+        if (failures.Count > 0) msg += $" ({failures.Count} skipped)";
+        return msg;
+    }
+
+    private async Task InjectAllAsync()
+    {
+        if (Archives.Count == 0) return;
 
         IsBusy = true;
         LastError = null;
-        StatusMessage = "Reading .vaj entries…";
 
-        var archivePath = _currentArchivePath;
-        var entries = VajEntries.ToList(); // snapshot
+        // Snapshot so the iteration isn't disturbed if the collection changes.
+        var snapshot = Archives.ToList();
+        var failures = new List<string>();
+        var totalPatched = 0;
 
         try
         {
-            // Read + patch every .vaj on a background thread.
-            var patched = await Task.Run(() => ReadAndPatchAll(archivePath, entries));
+            for (var i = 0; i < snapshot.Count; i++)
+            {
+                var archive = snapshot[i];
+                StatusMessage = $"Patching {i + 1}/{snapshot.Count}: {archive.FileName}…";
 
-            StatusMessage = $"Saving patched archive ({patched.Count} .vaj file(s))…";
+                try
+                {
+                    var count = await Task.Run(() => PatchOneArchive(archive));
+                    totalPatched += count;
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{archive.FileName}: {ex.Message}");
+                }
+            }
 
-            // Save-back is synchronous IO; run on background to keep UI responsive.
-            await Task.Run(() => VarPackageService.Save(archivePath, patched));
-
-            StatusMessage = $"Injected plugin blocks into {patched.Count} .vaj file(s) — saved {Path.GetFileName(archivePath)}.";
-        }
-        catch (InvalidDataException)
-        {
-            LastError = "A .vaj entry contained invalid JSON and could not be parsed.";
-            StatusMessage = "Inject failed — see error above.";
-        }
-        catch (JsonReaderException ex)
-        {
-            LastError = $"JSON parse error: {ex.Message}";
-            StatusMessage = "Inject failed — see error above.";
-        }
-        catch (Exception ex)
-        {
-            LastError = $"Inject failed: {ex.Message}";
-            StatusMessage = "Inject failed — see error above.";
+            var okArchives = snapshot.Count - failures.Count;
+            StatusMessage = failures.Count == 0
+                ? $"Injected plugin blocks into {totalPatched} .vaj file(s) across {okArchives} archive(s)."
+                : $"Injected into {totalPatched} .vaj file(s) across {okArchives} archive(s). {failures.Count} failed — see error below.";
+            if (failures.Count > 0)
+                LastError = "Some archives failed:\n  • " + string.Join("\n  • ", failures);
         }
         finally
         {
@@ -138,41 +189,33 @@ public sealed class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Opens the archive once, reads each .vaj stream, parses to JObject,
-    /// runs the patch, and returns the dictionary keyed by zip entry name.
-    /// Malformed JSON in one .vaj aborts the whole batch (reported via
-    /// InvalidDataException); we don't want to half-inject.
+    /// Opens one archive, reads every .vaj stream, patches with the
+    /// injection service, and saves atomically. Returns the number of
+    /// .vaj files patched.
     /// </summary>
-    private static IReadOnlyDictionary<string, JObject> ReadAndPatchAll(
-        string archivePath, IReadOnlyList<VajEntryInfo> entries)
+    private static int PatchOneArchive(ArchiveViewModel archive)
     {
-        var result = new Dictionary<string, JObject>(StringComparer.Ordinal);
+        var patched = new Dictionary<string, JObject>(StringComparer.Ordinal);
 
-        using var archive = ZipFile.OpenRead(archivePath);
-
-        foreach (var info in entries)
+        using (var zip = ZipFile.OpenRead(archive.FilePath))
         {
-            var entry = archive.GetEntry(info.EntryName)
-                ?? throw new InvalidDataException($"Entry disappeared mid-read: {info.EntryName}");
+            foreach (var info in archive.VajEntries)
+            {
+                var entry = zip.GetEntry(info.EntryName)
+                    ?? throw new InvalidDataException($"Entry disappeared: {info.EntryName}");
 
-            using var stream = entry.Open();
-            using var reader = new StreamReader(stream);
-            using var jsonReader = new JsonTextReader(reader);
+                using var stream = entry.Open();
+                using var reader = new StreamReader(stream);
+                using var jsonReader = new JsonTextReader(reader);
 
-            var root = JObject.Load(jsonReader);
-            VajInjectionService.Patch(root, info.Basename);
+                var root = JObject.Load(jsonReader);
+                VajInjectionService.Patch(root, info.Basename);
 
-            result[info.EntryName] = root;
+                patched[info.EntryName] = root;
+            }
         }
 
-        return result;
-    }
-
-    private void ResetArchive(string status)
-    {
-        CurrentArchivePath = null;
-        VajEntries.Clear();
-        StatusMessage = status;
-        InjectCommand.RaiseCanExecuteChanged();
+        VarPackageService.Save(archive.FilePath, patched);
+        return patched.Count;
     }
 }

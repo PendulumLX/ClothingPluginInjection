@@ -30,17 +30,21 @@ dotnet build VamInjector.slnx
 dotnet run --project src/VamInjector
 ```
 
-Drag a `.var` onto the window, click **Inject Plugin Blocks**.
+Drag one **or more** `.var` files onto the window. Each archive shows up in
+the left list; selecting an archive shows its `.vaj` files in the right
+list. Click **Inject Plugin Blocks** to patch every loaded archive.
+Non-`.var` files in a mixed drop are reported in the error banner rather
+than silently dropped.
 
 ## Headless verifier (optional)
 
 `verify/` is a console project that links the same Services source files and
 exercises Open / Patch / Save, asserting archive integrity (binary siblings
 byte-identical, all entries present, JSON blocks correct). Useful as a
-regression test:
+regression test. Accepts one or more paths:
 
 ```bash
-dotnet run --project verify -- "<path-to-var>"
+dotnet run --project verify -- "<path-to-var>" ["<path-to-var>"...]
 ```
 
 ## Safety
