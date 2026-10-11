@@ -14,8 +14,11 @@ public static class VajInjectionService
     public const string PluginKey = "plugin#0";
 
     /// <summary>
-    /// Idempotent on the components block (won't duplicate MVRPluginManager),
-    /// always-appends on the storables block (duplicates allowed).
+    /// Fully idempotent: running on an already-patched .vaj adds nothing.
+    /// The components block is skipped if any entry with
+    /// <c>type: "MVRPluginManager"</c> already exists; the storables block
+    /// is skipped if a storable with the .vaj's basename already has
+    /// <c>plugins["plugin#0"]</c> set to our exact plugin reference.
     /// </summary>
     /// <param name="vajRoot">Parsed .vaj JSON. Mutated in place.</param>
     /// <param name="vajBasename">.vaj file basename WITHOUT the .vaj extension.</param>
@@ -51,6 +54,21 @@ public static class VajInjectionService
     private static void InjectStorable(JObject root, string vajBasename)
     {
         var storables = EnsureArray(root, "storables");
+
+        // Skip if this .vaj already has a storable matching its basename and
+        // already pointing at our exact plugin reference. This makes the
+        // operation fully idempotent — re-running the injector (or running
+        // it on a .vaj someone else pre-edited) does not pile up duplicates.
+        foreach (var token in storables)
+        {
+            if (token is JObject obj &&
+                (string?)obj["id"] == vajBasename &&
+                obj["plugins"] is JObject plugs &&
+                (string?)plugs[PluginKey] == PluginReference)
+            {
+                return;
+            }
+        }
 
         var newStorable = new JObject
         {

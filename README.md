@@ -8,9 +8,10 @@ or more `.vaj` JSON scene files. This tool:
 
 1. Opens a `.var` (via drag-and-drop or via the verifier CLI).
 2. Lists every `.vaj` it finds.
-3. On **Inject Plugin Blocks**, appends two blocks to each `.vaj`:
+3. On **Inject Plugin Blocks**, appends two blocks to each `.vaj` (fully
+   idempotent — re-running on an already-patched file adds nothing):
    - `components`: `{ "type": "MVRPluginManager" }` *(skipped if already present)*
-   - `storables`: `{ "id": "<vaj filename without extension>", "plugins": { "plugin#0": "Stopper.ClothingPluginManager.latest:/Custom/Scripts/Stopper/ClothingPluginManager/ClothingPluginManager.cs" } }`
+   - `storables`: `{ "id": "<vaj filename without extension>", "plugins": { "plugin#0": "Stopper.ClothingPluginManager.latest:/Custom/Scripts/Stopper/ClothingPluginManager/ClothingPluginManager.cs" } }` *(skipped if a storable with the same id already points at this exact plugin reference)*
 4. Saves the modified `.vaj`(s) back into the original `.var`, byte-preserving
    every other entry (binary siblings like `.vab`, `.jpg`, `.vam` survive the
    round-trip exactly).
